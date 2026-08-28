@@ -18,7 +18,7 @@ ul#terms li:last-child{border-bottom:0}
 ul#terms li.sel{background:#000;color:#fff}
 ul#terms li .tag{float:right;font:11px monospace;opacity:.7}
 .stage{position:relative;display:inline-block;line-height:0;border:1px solid #999;max-width:100%}
-.stage img{display:block;max-width:100%;height:auto}
+.stage img{display:block;max-width:100%;max-height:var(--maph,80vh);width:auto;height:auto}
 .overlay{position:absolute;inset:0}
 .paths{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 .mk{position:absolute;transform:translate(-50%,-50%);font:bold 11px/17px monospace;min-width:19px;height:19px;
@@ -28,6 +28,8 @@ ul#terms li .tag{float:right;font:11px monospace;opacity:.7}
 .ans{position:absolute;transform:translate(-50%,-50%);width:9px;height:9px;border:1px solid #000;
      border-radius:50%;background:#ffdf3d;pointer-events:none}
 .ans i{position:absolute;left:9px;top:-5px;font:10px/1 monospace;font-style:normal;background:#fff;padding:1px}
+.ring{position:absolute;transform:translate(-50%,-50%);border:1px dashed #c00;border-radius:50%;
+      pointer-events:none;opacity:.55}
 #ph{width:520px;max-width:100%;height:340px;display:flex;align-items:center;justify-content:center;
     color:#666;font-size:13px;text-align:center;padding:20px;line-height:1.5}
 textarea,input[type=text],input[type=url],select{font:12px monospace;width:100%;padding:3px}
@@ -53,8 +55,10 @@ summary{cursor:pointer;font-size:12px;color:#444}
     <label><input type="radio" name="mode" value="drill"> Drill</label>
     <label><input type="radio" name="mode" value="author"> Author key</label>
   </span>
-  <span>Tolerance <input type="range" id="tol" min="1" max="15" step="0.5" style="width:110px;vertical-align:middle"> <span id="tolv" class="small"></span></span>
+  <span>Tolerance <input type="range" id="tol" min="1" max="40" step="0.5" style="width:110px;vertical-align:middle"> <span id="tolv" class="small"></span></span>
+  <span>Map size <input type="range" id="zoom" min="40" max="300" step="10" style="width:80px;vertical-align:middle"></span>
   <label class="small"><input type="checkbox" id="showkey"> Show key</label>
+  <label class="small"><input type="checkbox" id="showring"> Show tolerance</label>
 </div>
 
 <div id="wrap">
@@ -90,6 +94,7 @@ summary{cursor:pointer;font-size:12px;color:#444}
       <p class="small">The app looks for <code>map.png</code> next to this file. You can also load one here (stored in this browser only).</p>
       <input type="file" id="file" accept="image/*">
       <div class="row"><input type="url" id="url" placeholder="or paste an image URL"><button id="loadurl">Load</button></div>
+      <p class="small" id="imgnote"></p>
       <p class="small"><b>Warning:</b> answer coordinates are relative to the image. Swapping in a different map invalidates the key.</p>
     </details>
 
@@ -159,11 +164,12 @@ function load(){
   var useStored = stored && stored.terms && stored.terms.length && (+stored.version || 0) >= baked.version;
   if (useStored){
     S = { version:+stored.version || 0, tol:+stored.tol || 5, terms:cleanTerms(stored.terms),
-          imgSrc:stored.imgSrc || null, stats:stored.stats || {} };
+          imgSrc:stored.imgSrc || null, stats:stored.stats || {}, zoom:+stored.zoom || 80 };
     source = 'your saved copy (v' + S.version + ')';
   } else {
     S = { version: baked.version < 0 ? 0 : baked.version, tol:baked.tol, terms:baked.terms,
-          imgSrc:(stored && stored.imgSrc) || null, stats:(stored && stored.stats) || {} };
+          imgSrc:(stored && stored.imgSrc) || null, stats:(stored && stored.stats) || {},
+          zoom:(stored && +stored.zoom) || 80 };
     source = BAKED ? 'published key.js (v' + baked.version + ')' : 'nothing saved yet';
   }
   if (!S.terms.length) S.terms = DEFAULTS.map(function(l){ return { label:l, pts:[] }; });
@@ -227,6 +233,9 @@ function tol(){ return S.tol / 100; }
 function isRight(term, p){ return term.pts.length > 0 && nearest(term, p) <= tol(); }
 
 /* -------------------------------------------------------------- picture */
+/* A data-URI map easily exceeds the ~5 MB localStorage quota, and storing one
+   would take the answer key down with it. Big images display but aren't saved. */
+var IMG_LIMIT = 1200000;
 function setImage(src, remember){
   if (imgEl){ imgEl.remove(); imgEl = null; }
   var img = document.createElement('img');
@@ -234,7 +243,17 @@ function setImage(src, remember){
   img.onerror = function(){ img.remove(); imgEl = null; el('ph').style.display = 'flex'; };
   img.src = src;
   stage.insertBefore(img, overlay);
-  if (remember){ S.imgSrc = src; save(); }
+  if (!remember) return;
+  if (src.slice(0, 5) === 'data:' && src.length > IMG_LIMIT){
+    S.imgSrc = null;
+    save();
+    el('imgnote').textContent = 'Loaded, but too large to keep in browser storage — it will be gone on reload. ' +
+      'Save this image as map.png next to index.html and it loads every time.';
+  } else {
+    S.imgSrc = src;
+    save();
+    el('imgnote').textContent = 'Saved in this browser.';
+  }
 }
 
 /* ------------------------------------------------------------ rendering */
@@ -305,8 +324,9 @@ function shouldShow(i){
 }
 
 function drawAnswers(){
-  var old = overlay.querySelectorAll('.ans');
+  var old = overlay.querySelectorAll('.ans,.ring');
   for (var i = 0; i < old.length; i++) old[i].remove();
+  var ringPx = el('showring').checked ? rect().width * tol() * 2 : 0;
   var svg = el('paths');
   svg.innerHTML = '';
   S.terms.forEach(function(t, i){
@@ -321,6 +341,15 @@ function drawAnswers(){
       svg.appendChild(pl);
     }
     t.pts.forEach(function(p, k){
+      if (ringPx){
+        var g = document.createElement('div');
+        g.className = 'ring';
+        g.style.left = (p[0] * 100) + '%';
+        g.style.top = (p[1] * 100) + '%';
+        g.style.width = ringPx + 'px';
+        g.style.height = ringPx + 'px';
+        overlay.appendChild(g);
+      }
       var a = document.createElement('div');
       a.className = 'ans';
       a.style.left = (p[0] * 100) + '%';
@@ -484,6 +513,13 @@ el('tol').oninput = function(){
   save();
 };
 el('showkey').onchange = draw;
+el('showring').onchange = draw;
+el('zoom').oninput = function(){
+  S.zoom = +this.value;
+  document.documentElement.style.setProperty('--maph', S.zoom + 'vh');
+  draw();
+  save();
+};
 
 Array.prototype.forEach.call(document.querySelectorAll('input[name=mode]'), function(r){
   r.onchange = function(){
@@ -549,6 +585,9 @@ el('revert').onclick = function(){
 
 /* ----------------------------------------------------------------- init */
 function boot(){
+  S.zoom = S.zoom || 80;
+  el('zoom').value = S.zoom;
+  document.documentElement.style.setProperty('--maph', S.zoom + 'vh');
   el('tol').value = S.tol;
   el('tolv').textContent = S.tol + '% of width';
   el('termtext').value = S.terms.map(function(t){ return t.label; }).join('\n');
