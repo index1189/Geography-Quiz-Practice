@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Map Quiz</title>
+<style>
+*{box-sizing:border-box}
+body{font:14px/1.45 system-ui,sans-serif;margin:0;color:#000;background:#fff}
+#top{border-bottom:1px solid #999;padding:6px 10px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+#wrap{display:flex;align-items:flex-start;gap:14px;padding:10px}
+#side{width:280px;flex:none}
+#mapcol{flex:1;min-width:0}
+h2{font-size:12px;margin:14px 0 5px;text-transform:uppercase;letter-spacing:.06em;color:#444}
+ul#terms{list-style:none;margin:0;padding:0;max-height:62vh;overflow:auto;border:1px solid #bbb}
+ul#terms li{padding:2px 6px;cursor:pointer;border-bottom:1px solid #eee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ul#terms li:last-child{border-bottom:0}
+ul#terms li.sel{background:#000;color:#fff}
+ul#terms li .tag{float:right;font:11px monospace;opacity:.7}
+.stage{position:relative;display:inline-block;line-height:0;border:1px solid #999;max-width:100%}
+.stage img{display:block;max-width:100%;height:auto}
+.overlay{position:absolute;inset:0}
+.paths{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.mk{position:absolute;transform:translate(-50%,-50%);font:bold 11px/17px monospace;min-width:19px;height:19px;
+    text-align:center;border:1px solid #000;background:#fff;cursor:pointer;padding:0 2px}
+.mk.ok{background:#b8e6b8}
+.mk.no{background:#f2b0b0}
+.ans{position:absolute;transform:translate(-50%,-50%);width:9px;height:9px;border:1px solid #000;
+     border-radius:50%;background:#ffdf3d;pointer-events:none}
+.ans i{position:absolute;left:9px;top:-5px;font:10px/1 monospace;font-style:normal;background:#fff;padding:1px}
+#ph{width:520px;max-width:100%;height:340px;display:flex;align-items:center;justify-content:center;
+    color:#666;font-size:13px;text-align:center;padding:20px;line-height:1.5}
+textarea,input[type=text],input[type=url],select{font:12px monospace;width:100%;padding:3px}
+textarea{min-height:120px}
+button{font:12px system-ui;padding:3px 8px;cursor:pointer}
+.small{font-size:12px;color:#555;line-height:1.4}
+.row{margin:6px 0;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+#status{font:11px monospace;color:#555;padding:4px 10px;border-top:1px solid #ddd}
+#drillbox{border:1px solid #bbb;padding:8px;margin-bottom:8px}
+#prompt{font-size:18px;font-weight:700}
+#verdict{font-weight:700}
+details{margin-top:12px;border-top:1px solid #ddd;padding-top:8px}
+summary{cursor:pointer;font-size:12px;color:#444}
+</style>
+</head>
+<body>
+
+<div id="top">
+  <b>Map Quiz</b>
+  <span>
+    Mode:
+    <label><input type="radio" name="mode" value="quiz" checked> Full quiz</label>
+    <label><input type="radio" name="mode" value="drill"> Drill</label>
+    <label><input type="radio" name="mode" value="author"> Author key</label>
+  </span>
+  <span>Tolerance <input type="range" id="tol" min="1" max="15" step="0.5" style="width:110px;vertical-align:middle"> <span id="tolv" class="small"></span></span>
+  <label class="small"><input type="checkbox" id="showkey"> Show key</label>
+</div>
+
+<div id="wrap">
+  <div id="side">
+
+    <div id="drillbox" style="display:none">
+      <div id="prompt">&mdash;</div>
+      <div id="verdict" class="small">Click the map where it belongs.</div>
+      <div class="row"><button id="next">Next &rarr;</button><button id="skip">Skip</button></div>
+    </div>
+
+    <h2>Terms</h2>
+    <ul id="terms"></ul>
+    <p class="small" id="listhint"></p>
+
+    <div id="quizctl">
+      <div class="row"><button id="check">Check answers</button><button id="clearq">Clear placements</button></div>
+      <div id="score" class="small"></div>
+    </div>
+
+    <div id="authorctl" style="display:none">
+      <div class="row"><button id="undopt">Undo last point</button><button id="clearpts">Clear this term</button></div>
+      <div class="row"><label><input type="checkbox" id="linemode"> Line feature (river, border, coast)</label></div>
+      <p class="small">Click the map to add accepted locations for the selected term.
+        A <b>city</b> needs one click. A <b>region or sea</b>: a few clicks across it.
+        A <b>river</b>: tick &ldquo;Line feature&rdquo; and click along its course &mdash; anywhere
+        on the path between your clicks then counts as correct. Saves automatically.</p>
+      <div class="row"><button id="dl">Download key.js</button><button id="showtext">Show key text</button></div>
+    </div>
+
+    <details>
+      <summary>Map image</summary>
+      <p class="small">The app looks for <code>map.png</code> next to this file. You can also load one here (stored in this browser only).</p>
+      <input type="file" id="file" accept="image/*">
+      <div class="row"><input type="url" id="url" placeholder="or paste an image URL"><button id="loadurl">Load</button></div>
+      <p class="small"><b>Warning:</b> answer coordinates are relative to the image. Swapping in a different map invalidates the key.</p>
+    </details>
+
+    <details>
+      <summary>Edit term list</summary>
+      <p class="small">One per line, in quiz-number order. Points are kept for terms whose spelling is unchanged.</p>
+      <textarea id="termtext"></textarea>
+      <div class="row"><button id="applyterms">Apply list</button></div>
+    </details>
+
+    <details>
+      <summary>Data</summary>
+      <div class="row"><button id="resetstats">Reset drill stats</button><button id="revert">Revert to published key</button></div>
+      <p class="small">Your work saves to this browser automatically. To share it with other people, download <code>key.js</code> and put it next to <code>index.html</code>.</p>
+      <textarea id="keytext" style="display:none"></textarea>
+    </details>
+
+  </div>
+
+  <div id="mapcol">
+    <div class="stage" id="stage">
+      <div id="ph">No map image loaded.<br>Put <code>map.png</code> next to this file,<br>or load one under &ldquo;Map image&rdquo;.</div>
+      <svg class="paths" id="paths" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+      <div class="overlay" id="overlay"></div>
+    </div>
+  </div>
+</div>
+
+<div id="status"></div>
+
+<script src="key.js"></script>
+<script>
+/* ---------------------------------------------------------------- state */
+var BAKED = window.MAPQUIZ_KEY || null;
+var LS = 'mapquiz:germany';
+var DEFAULTS = ["Rhine","Danube","Elbe","Oder","Main","Weser","Moselle","Neckar","Spree",
+ "Berlin","Hamburg","Munich","Cologne","Frankfurt","Stuttgart","Dusseldorf","Dresden",
+ "Leipzig","Bremen","Hannover","Nuremberg","Kiel","Bavaria","Saxony","Black Forest",
+ "Bavarian Alps","Ruhr Area","Rhineland","North Sea","Baltic Sea","Lake Constance",
+ "Harz Mtns","Zugspitze","Rugen","Saarland"];
+
+var S = null;          /* {version, tol, terms:[{label,pts:[[x,y]]}], imgSrc, stats:{label:{n,ok}}} */
+var source = '';       /* where the key came from, for the status line */
+var placements = {};   /* termIndex -> [x,y]   (full-quiz mode) */
+var sel = 0;           /* selected term index */
+var mode = 'quiz';
+var checked = false;
+var drill = null;      /* {i, guess, ok} current drill question */
+var imgEl = null;
+
+function el(id){ return document.getElementById(id); }
+var stage = el('stage'), overlay = el('overlay');
+
+function cleanTerms(list){
+  return (list || []).map(function(t){
+    return { label: String(t.label), line: !!t.line,
+             pts: (t.pts || []).map(function(p){ return [+p[0], +p[1]]; }) };
+  });
+}
+
+function load(){
+  var stored = null;
+  try { stored = JSON.parse(localStorage.getItem(LS) || 'null'); } catch(e){}
+  var baked = BAKED
+    ? { version:+BAKED.version || 0, tol:+BAKED.tol || 5, terms:cleanTerms(BAKED.terms) }
+    : { version:-1, tol:5, terms:[] };
+  var useStored = stored && stored.terms && stored.terms.length && (+stored.version || 0) >= baked.version;
+  if (useStored){
+    S = { version:+stored.version || 0, tol:+stored.tol || 5, terms:cleanTerms(stored.terms),
+          imgSrc:stored.imgSrc || null, stats:stored.stats || {} };
+    source = 'your saved copy (v' + S.version + ')';
+  } else {
+    S = { version: baked.version < 0 ? 0 : baked.version, tol:baked.tol, terms:baked.terms,
+          imgSrc:(stored && stored.imgSrc) || null, stats:(stored && stored.stats) || {} };
+    source = BAKED ? 'published key.js (v' + baked.version + ')' : 'nothing saved yet';
+  }
+  if (!S.terms.length) S.terms = DEFAULTS.map(function(l){ return { label:l, pts:[] }; });
+}
+
+var saveWarned = false;
+function save(){
+  try {
+    localStorage.setItem(LS, JSON.stringify(S));
+    el('status').textContent = 'Key: ' + source + ' · saved ' + new Date().toLocaleTimeString();
+  } catch(e){
+    if (!saveWarned){
+      saveWarned = true;
+      alert('Could not save to this browser (storage is full). If you loaded a large map image here, save it as map.png next to this file instead.');
+    }
+    el('status').textContent = 'Key: ' + source + ' · SAVE FAILED (storage full)';
+  }
+}
+
+/* ------------------------------------------------------------- geometry */
+function rect(){ return (imgEl || stage).getBoundingClientRect(); }
+function toNorm(cx, cy){
+  var r = rect();
+  return [ Math.min(1, Math.max(0, (cx - r.left) / r.width)),
+           Math.min(1, Math.max(0, (cy - r.top) / r.height)) ];
+}
+function inMap(cx, cy){
+  var r = rect();
+  return cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom;
+}
+/* distance in fractions of image width; y is scaled so the tolerance circle is round on screen */
+function dist(a, b){
+  var r = rect(), asp = r.height / r.width;
+  var dx = a[0] - b[0], dy = (a[1] - b[1]) * asp;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+/* distance to the segment a-b, same scaled space as dist() */
+function distSeg(p, a, b){
+  var r = rect(), asp = r.height / r.width;
+  var px = p[0], py = p[1] * asp;
+  var ax = a[0], ay = a[1] * asp, bx = b[0], by = b[1] * asp;
+  var dx = bx - ax, dy = by - ay;
+  var len = dx * dx + dy * dy;
+  var t = len ? ((px - ax) * dx + (py - ay) * dy) / len : 0;
+  t = Math.max(0, Math.min(1, t));
+  var qx = ax + t * dx, qy = ay + t * dy;
+  return Math.sqrt((px - qx) * (px - qx) + (py - qy) * (py - qy));
+}
+/* Line terms (rivers, borders) accept anywhere along the path between the
+   marked points. Point terms accept only near a marked point. */
+function nearest(term, p){
+  var best = Infinity, i;
+  if (term.line && term.pts.length > 1){
+    for (i = 0; i < term.pts.length - 1; i++) best = Math.min(best, distSeg(p, term.pts[i], term.pts[i+1]));
+  } else {
+    for (i = 0; i < term.pts.length; i++) best = Math.min(best, dist(p, term.pts[i]));
+  }
+  return best;
+}
+function tol(){ return S.tol / 100; }
+function isRight(term, p){ return term.pts.length > 0 && nearest(term, p) <= tol(); }
+
+/* -------------------------------------------------------------- picture */
+function setImage(src, remember){
+  if (imgEl){ imgEl.remove(); imgEl = null; }
+  var img = document.createElement('img');
+  img.onload = function(){ imgEl = img; el('ph').style.display = 'none'; draw(); };
+  img.onerror = function(){ img.remove(); imgEl = null; el('ph').style.display = 'flex'; };
+  img.src = src;
+  stage.insertBefore(img, overlay);
+  if (remember){ S.imgSrc = src; save(); }
+}
+
+/* ------------------------------------------------------------ rendering */
+function acc(term){
+  var s = S.stats[term.label];
+  if (!s || !s.n) return null;
+  return Math.round(100 * s.ok / s.n);
+}
+
+function drawList(){
+  var ul = el('terms');
+  ul.innerHTML = '';
+  S.terms.forEach(function(t, i){
+    var li = document.createElement('li');
+    var tag = '';
+    if (mode === 'author'){
+      tag = t.pts.length ? t.pts.length + (t.line ? ' line' : ' pt') : '—';
+    } else if (mode === 'drill'){
+      var a = acc(t);
+      tag = (a === null ? 'new' : a + '%');
+    } else {
+      tag = placements[i] ? 'placed' : '';
+    }
+    li.innerHTML = '<span class="tag">' + tag + '</span>' + (i + 1) + '. ' + t.label;
+    if (i === sel) li.className = 'sel';
+    li.onclick = function(){ if (mode === 'drill') return; sel = i; draw(); };
+    ul.appendChild(li);
+  });
+}
+
+function mk(num, p, title){
+  var m = document.createElement('div');
+  m.className = 'mk';
+  m.textContent = num;
+  m.title = title;
+  m.style.left = (p[0] * 100) + '%';
+  m.style.top = (p[1] * 100) + '%';
+  overlay.appendChild(m);
+  return m;
+}
+
+function drawMarkers(){
+  var old = overlay.querySelectorAll('.mk');
+  for (var i = 0; i < old.length; i++) old[i].remove();
+  if (mode === 'quiz'){
+    Object.keys(placements).forEach(function(k){
+      var idx = +k, p = placements[idx], t = S.terms[idx];
+      var m = mk(idx + 1, p, t.label);
+      if (checked) m.className += isRight(t, p) ? ' ok' : ' no';
+      m.onclick = function(e){
+        e.stopPropagation();
+        delete placements[idx];
+        sel = idx; checked = false;
+        el('score').textContent = '';
+        draw();
+      };
+    });
+  } else if (mode === 'drill' && drill && drill.guess){
+    var m2 = mk(drill.i + 1, drill.guess, S.terms[drill.i].label);
+    m2.className += drill.ok ? ' ok' : ' no';
+  }
+}
+
+function shouldShow(i){
+  return el('showkey').checked
+    || (mode === 'author' && i === sel)
+    || (mode === 'drill' && drill && drill.guess && drill.i === i);
+}
+
+function drawAnswers(){
+  var old = overlay.querySelectorAll('.ans');
+  for (var i = 0; i < old.length; i++) old[i].remove();
+  var svg = el('paths');
+  svg.innerHTML = '';
+  S.terms.forEach(function(t, i){
+    if (!shouldShow(i)) return;
+    if (t.line && t.pts.length > 1){
+      var pl = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+      pl.setAttribute('points', t.pts.map(function(p){ return (p[0]*100) + ',' + (p[1]*100); }).join(' '));
+      pl.setAttribute('fill', 'none');
+      pl.setAttribute('stroke', '#ffdf3d');
+      pl.setAttribute('stroke-width', '3');
+      pl.setAttribute('vector-effect', 'non-scaling-stroke');
+      svg.appendChild(pl);
+    }
+    t.pts.forEach(function(p, k){
+      var a = document.createElement('div');
+      a.className = 'ans';
+      a.style.left = (p[0] * 100) + '%';
+      a.style.top = (p[1] * 100) + '%';
+      if (k === 0) a.innerHTML = '<i>' + (i + 1) + '</i>';
+      overlay.appendChild(a);
+    });
+  });
+}
+
+function draw(){
+  el('linemode').checked = !!S.terms[sel].line;
+  drawList(); drawMarkers(); drawAnswers();
+}
+
+/* ------------------------------------------------------------- map click */
+stage.addEventListener('click', function(e){
+  if (!imgEl || !inMap(e.clientX, e.clientY)) return;
+  var p = toNorm(e.clientX, e.clientY);
+
+  if (mode === 'author'){
+    S.terms[sel].pts.push([+p[0].toFixed(4), +p[1].toFixed(4)]);
+    save();
+    draw();
+
+  } else if (mode === 'quiz'){
+    placements[sel] = p;
+    checked = false;
+    el('score').textContent = '';
+    for (var k = 1; k <= S.terms.length; k++){
+      var j = (sel + k) % S.terms.length;
+      if (!placements[j]){ sel = j; break; }
+    }
+    draw();
+
+  } else if (mode === 'drill' && drill && !drill.guess){
+    var t = S.terms[drill.i];
+    drill.guess = p;
+    drill.ok = isRight(t, p);
+    var s = S.stats[t.label] || { n:0, ok:0 };
+    s.n++;
+    if (drill.ok) s.ok++;
+    S.stats[t.label] = s;
+    save();
+    el('verdict').innerHTML = drill.ok
+      ? '<span style="color:#060">Correct.</span>'
+      : '<span style="color:#900">Off by ' + Math.round(nearest(t, p) * 100) +
+        '% of map width.</span> Yellow dots show the accepted spots.';
+    draw();
+  }
+});
+
+/* -------------------------------------------------------------- quiz UI */
+el('check').onclick = function(){
+  var keyed = S.terms.filter(function(t){ return t.pts.length; });
+  if (!keyed.length){
+    alert('No answer key yet. Switch to "Author key" mode and mark locations first.');
+    return;
+  }
+  checked = true;
+  var ok = 0, placed = 0;
+  S.terms.forEach(function(t, i){
+    if (!t.pts.length) return;
+    var p = placements[i];
+    if (!p) return;
+    placed++;
+    var right = isRight(t, p);
+    if (right) ok++;
+    var s = S.stats[t.label] || { n:0, ok:0 };
+    s.n++;
+    if (right) s.ok++;
+    S.stats[t.label] = s;
+  });
+  el('score').innerHTML = '<b>' + ok + ' / ' + keyed.length + '</b> correct &middot; ' +
+    placed + ' placed, ' + (keyed.length - placed) + ' missing.';
+  save();
+  draw();
+};
+el('clearq').onclick = function(){
+  placements = {}; checked = false;
+  el('score').textContent = '';
+  draw();
+};
+
+/* ------------------------------------------------------------- drill UI */
+function pickDrill(){
+  var pool = [];
+  S.terms.forEach(function(t, i){ if (t.pts.length) pool.push(i); });
+  if (!pool.length) return null;
+  if (pool.length > 1 && drill){
+    pool = pool.filter(function(i){ return i !== drill.i; });
+  }
+  var weights = pool.map(function(i){
+    var s = S.stats[S.terms[i].label];
+    if (!s || !s.n) return 5;                /* unseen terms come up first */
+    return 1 + 4 * (1 - s.ok / s.n);         /* then whatever you keep missing */
+  });
+  var total = weights.reduce(function(a, b){ return a + b; }, 0);
+  var r = Math.random() * total;
+  for (var k = 0; k < pool.length; k++){
+    r -= weights[k];
+    if (r <= 0) return pool[k];
+  }
+  return pool[pool.length - 1];
+}
+function nextDrill(){
+  var i = pickDrill();
+  if (i === null){
+    drill = null;
+    el('prompt').textContent = 'No answer key yet.';
+    el('verdict').textContent = 'Build one in Author key mode.';
+    return;
+  }
+  drill = { i:i, guess:null, ok:false };
+  sel = i;
+  el('prompt').textContent = (i + 1) + '. ' + S.terms[i].label;
+  el('verdict').textContent = 'Click the map where it belongs.';
+  draw();
+}
+el('next').onclick = nextDrill;
+el('skip').onclick = nextDrill;
+
+/* ------------------------------------------------------------ author UI */
+el('undopt').onclick = function(){ S.terms[sel].pts.pop(); save(); draw(); };
+el('clearpts').onclick = function(){ S.terms[sel].pts = []; save(); draw(); };
+el('linemode').onchange = function(){ S.terms[sel].line = this.checked; save(); draw(); };
+
+function keyFileText(){
+  var rows = S.terms.map(function(t){
+    return '  {"label":' + JSON.stringify(t.label) +
+           ',"line":' + (t.line ? 'true' : 'false') +
+           ',"pts":' + JSON.stringify(t.pts) + '}';
+  }).join(',\n');
+  return 'window.MAPQUIZ_KEY = {\n "version": ' + (S.version + 1) +
+         ',\n "tol": ' + S.tol + ',\n "terms": [\n' + rows + '\n ]\n};\n';
+}
+el('dl').onclick = function(){
+  var blob = new Blob([keyFileText()], { type:'text/javascript' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'key.js';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  S.version = S.version + 1;
+  source = 'your saved copy (v' + S.version + ')';
+  save();
+};
+el('showtext').onclick = function(){
+  var t = el('keytext');
+  t.style.display = 'block';
+  t.value = keyFileText();
+  t.select();
+};
+
+/* --------------------------------------------------------------- config */
+el('tol').oninput = function(){
+  S.tol = parseFloat(this.value);
+  el('tolv').textContent = S.tol + '% of width';
+  if (checked || (drill && drill.guess)) draw();
+  save();
+};
+el('showkey').onchange = draw;
+
+Array.prototype.forEach.call(document.querySelectorAll('input[name=mode]'), function(r){
+  r.onchange = function(){
+    mode = this.value;
+    checked = false;
+    el('score').textContent = '';
+    el('drillbox').style.display  = mode === 'drill'  ? 'block' : 'none';
+    el('quizctl').style.display   = mode === 'quiz'   ? 'block' : 'none';
+    el('authorctl').style.display = mode === 'author' ? 'block' : 'none';
+    el('listhint').textContent = mode === 'author'
+      ? 'Pick a term, then click its location(s) on the map.'
+      : (mode === 'drill'
+          ? 'Percentages are your accuracy so far.'
+          : 'Pick a term, then click the map. Click a placed number to remove it.');
+    if (mode === 'drill') nextDrill(); else drill = null;
+    draw();
+  };
+});
+
+el('applyterms').onclick = function(){
+  var lines = el('termtext').value.split('\n').map(function(s){ return s.trim(); }).filter(Boolean);
+  if (!lines.length){ alert('Empty list.'); return; }
+  var old = {};
+  S.terms.forEach(function(t){ old[t.label] = t; });
+  S.terms = lines.map(function(l){
+    return { label:l, line: old[l] ? !!old[l].line : false, pts: old[l] ? old[l].pts : [] };
+  });
+  sel = 0;
+  placements = {};
+  save();
+  draw();
+  alert('Term list updated: ' + lines.length + ' terms.');
+};
+
+el('file').onchange = function(e){
+  var f = e.target.files[0];
+  if (!f) return;
+  var r = new FileReader();
+  r.onload = function(){ setImage(r.result, true); };
+  r.readAsDataURL(f);
+};
+el('loadurl').onclick = function(){
+  var u = el('url').value.trim();
+  if (u) setImage(u, true);
+};
+el('resetstats').onclick = function(){
+  if (!confirm('Erase all drill accuracy stats?')) return;
+  S.stats = {};
+  save();
+  draw();
+};
+el('revert').onclick = function(){
+  if (!BAKED){ alert('No key.js is present to revert to.'); return; }
+  if (!confirm('Discard your local key and use the published key.js? Drill stats are kept.')) return;
+  S = { version:+BAKED.version || 0, tol:+BAKED.tol || 5, terms:cleanTerms(BAKED.terms),
+        imgSrc:S.imgSrc, stats:S.stats };
+  source = 'published key.js (v' + S.version + ')';
+  sel = 0;
+  placements = {};
+  save();
+  boot();
+};
+
+/* ----------------------------------------------------------------- init */
+function boot(){
+  el('tol').value = S.tol;
+  el('tolv').textContent = S.tol + '% of width';
+  el('termtext').value = S.terms.map(function(t){ return t.label; }).join('\n');
+  el('listhint').textContent = 'Pick a term, then click the map. Click a placed number to remove it.';
+  draw();
+}
+load();
+boot();
+setImage(S.imgSrc || 'map.png', false);
+el('status').textContent = 'Key: ' + source;
+window.addEventListener('resize', draw);
+</script>
+</body>
+</html>
