@@ -27,7 +27,9 @@ ul#terms li .tag{float:right;font:11px monospace;opacity:.7}
 .mk.no{background:#f2b0b0}
 .ans{position:absolute;transform:translate(-50%,-50%);width:9px;height:9px;border:1px solid #000;
      border-radius:50%;background:#ffdf3d;pointer-events:none}
-.ans i{position:absolute;left:9px;top:-5px;font:10px/1 monospace;font-style:normal;background:#fff;padding:1px}
+.ans i{position:absolute;left:9px;top:-5px;font:10px/1.2 system-ui,sans-serif;font-style:normal;
+       background:rgba(255,255,255,.85);padding:1px 3px;white-space:nowrap;border:1px solid #ccc;
+       border-radius:2px;color:#000}
 .ring{position:absolute;transform:translate(-50%,-50%);border:1px dashed #c00;border-radius:50%;
       pointer-events:none;opacity:.55}
 #ph{width:520px;max-width:100%;height:340px;display:flex;align-items:center;justify-content:center;
@@ -65,6 +67,14 @@ summary{cursor:pointer;font-size:12px;color:#444}
   <div id="side">
 
     <div id="drillbox" style="display:none">
+      <div class="row" style="margin-top:0">
+        <span class="small">Only</span>
+        <input type="number" id="dfrom" min="1" style="width:52px">
+        <span class="small">to</span>
+        <input type="number" id="dto" min="1" style="width:52px">
+        <button id="dall">All</button>
+      </div>
+      <div class="small" id="drange" style="margin-bottom:6px"></div>
       <div id="prompt">&mdash;</div>
       <div id="verdict" class="small">Click the map where it belongs.</div>
       <div class="row"><button id="next">Next &rarr;</button><button id="skip">Skip</button></div>
@@ -82,6 +92,9 @@ summary{cursor:pointer;font-size:12px;color:#444}
     <div id="authorctl" style="display:none">
       <div class="row"><button id="undopt">Undo last point</button><button id="clearpts">Clear this term</button></div>
       <div class="row"><label><input type="checkbox" id="linemode"> Line feature (river, border, coast)</label></div>
+      <div class="row"><span class="small">This term's tolerance</span>
+        <input type="number" id="termtol" min="0.5" max="40" step="0.5" style="width:60px">
+        <span class="small">% (blank = global)</span></div>
       <p class="small">Click the map to add accepted locations for the selected term.
         A <b>city</b> needs one click. A <b>region or sea</b>: a few clicks across it.
         A <b>river</b>: tick &ldquo;Line feature&rdquo; and click along its course &mdash; anywhere
@@ -151,6 +164,7 @@ var stage = el('stage'), overlay = el('overlay');
 function cleanTerms(list){
   return (list || []).map(function(t){
     return { label: String(t.label), line: !!t.line,
+             tol: (t.tol === null || t.tol === undefined || t.tol === '') ? null : +t.tol,
              pts: (t.pts || []).map(function(p){ return [+p[0], +p[1]]; }) };
   });
 }
@@ -164,12 +178,14 @@ function load(){
   var useStored = stored && stored.terms && stored.terms.length && (+stored.version || 0) >= baked.version;
   if (useStored){
     S = { version:+stored.version || 0, tol:+stored.tol || 5, terms:cleanTerms(stored.terms),
-          imgSrc:stored.imgSrc || null, stats:stored.stats || {}, zoom:+stored.zoom || 80 };
+          imgSrc:stored.imgSrc || null, stats:stored.stats || {}, zoom:+stored.zoom || 80,
+          dfrom:+stored.dfrom || 0, dto:+stored.dto || 0 };
     source = 'your saved copy (v' + S.version + ')';
   } else {
     S = { version: baked.version < 0 ? 0 : baked.version, tol:baked.tol, terms:baked.terms,
           imgSrc:(stored && stored.imgSrc) || null, stats:(stored && stored.stats) || {},
-          zoom:(stored && +stored.zoom) || 80 };
+          zoom:(stored && +stored.zoom) || 80,
+          dfrom:(stored && +stored.dfrom) || 0, dto:(stored && +stored.dto) || 0 };
     source = BAKED ? 'published key.js (v' + baked.version + ')' : 'nothing saved yet';
   }
   if (!S.terms.length) S.terms = DEFAULTS.map(function(l){ return { label:l, pts:[] }; });
@@ -230,7 +246,10 @@ function nearest(term, p){
   return best;
 }
 function tol(){ return S.tol / 100; }
-function isRight(term, p){ return term.pts.length > 0 && nearest(term, p) <= tol(); }
+/* A term may carry its own radius — cities near other cities need a tighter one
+   than a river or a region does. Falls back to the global setting. */
+function termTol(term){ return (term.tol == null ? S.tol : term.tol) / 100; }
+function isRight(term, p){ return term.pts.length > 0 && nearest(term, p) <= termTol(term); }
 
 /* -------------------------------------------------------------- picture */
 /* A data-URI map easily exceeds the ~5 MB localStorage quota, and storing one
@@ -326,11 +345,11 @@ function shouldShow(i){
 function drawAnswers(){
   var old = overlay.querySelectorAll('.ans,.ring');
   for (var i = 0; i < old.length; i++) old[i].remove();
-  var ringPx = el('showring').checked ? rect().width * tol() * 2 : 0;
   var svg = el('paths');
   svg.innerHTML = '';
   S.terms.forEach(function(t, i){
     if (!shouldShow(i)) return;
+    var ringPx = el('showring').checked ? rect().width * termTol(t) * 2 : 0;
     if (t.line && t.pts.length > 1){
       var pl = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
       pl.setAttribute('points', t.pts.map(function(p){ return (p[0]*100) + ',' + (p[1]*100); }).join(' '));
@@ -354,7 +373,10 @@ function drawAnswers(){
       a.className = 'ans';
       a.style.left = (p[0] * 100) + '%';
       a.style.top = (p[1] * 100) + '%';
-      if (k === 0) a.innerHTML = '<i>' + (i + 1) + '</i>';
+      if (k === 0){
+        a.innerHTML = '<i></i>';
+        a.firstChild.textContent = (i + 1) + '. ' + t.label;
+      }
       overlay.appendChild(a);
     });
   });
@@ -362,6 +384,7 @@ function drawAnswers(){
 
 function draw(){
   el('linemode').checked = !!S.terms[sel].line;
+  el('termtol').value = S.terms[sel].tol == null ? '' : S.terms[sel].tol;
   drawList(); drawMarkers(); drawAnswers();
 }
 
@@ -435,9 +458,17 @@ el('clearq').onclick = function(){
 };
 
 /* ------------------------------------------------------------- drill UI */
+/* Terms currently eligible for drilling: keyed, and inside the chosen number range. */
+function drillPool(){
+  var lo = Math.min(S.dfrom, S.dto), hi = Math.max(S.dfrom, S.dto), pool = [];
+  S.terms.forEach(function(t, i){
+    if (t.pts.length && (i + 1) >= lo && (i + 1) <= hi) pool.push(i);
+  });
+  return pool;
+}
+
 function pickDrill(){
-  var pool = [];
-  S.terms.forEach(function(t, i){ if (t.pts.length) pool.push(i); });
+  var pool = drillPool();
   if (!pool.length) return null;
   if (pool.length > 1 && drill){
     pool = pool.filter(function(i){ return i !== drill.i; });
@@ -456,11 +487,16 @@ function pickDrill(){
   return pool[pool.length - 1];
 }
 function nextDrill(){
+  var n = drillPool().length;
+  el('drange').textContent = n
+    ? n + ' term' + (n === 1 ? '' : 's') + ' in range ' + Math.min(S.dfrom, S.dto) + '–' + Math.max(S.dfrom, S.dto)
+    : 'No keyed terms in that range.';
   var i = pickDrill();
   if (i === null){
     drill = null;
-    el('prompt').textContent = 'No answer key yet.';
-    el('verdict').textContent = 'Build one in Author key mode.';
+    el('prompt').textContent = '—';
+    el('verdict').textContent = n ? '' : 'Widen the range, or key these terms first.';
+    draw();
     return;
   }
   drill = { i:i, guess:null, ok:false };
@@ -472,15 +508,35 @@ function nextDrill(){
 el('next').onclick = nextDrill;
 el('skip').onclick = nextDrill;
 
+function setRange(from, to){
+  var n = S.terms.length;
+  S.dfrom = Math.max(1, Math.min(n, from || 1));
+  S.dto   = Math.max(1, Math.min(n, to || n));
+  el('dfrom').value = S.dfrom;
+  el('dto').value = S.dto;
+  el('dfrom').max = el('dto').max = n;
+  save();
+  if (mode === 'drill') nextDrill();
+}
+el('dfrom').onchange = function(){ setRange(+this.value, S.dto); };
+el('dto').onchange   = function(){ setRange(S.dfrom, +this.value); };
+el('dall').onclick   = function(){ setRange(1, S.terms.length); };
+
 /* ------------------------------------------------------------ author UI */
 el('undopt').onclick = function(){ S.terms[sel].pts.pop(); save(); draw(); };
 el('clearpts').onclick = function(){ S.terms[sel].pts = []; save(); draw(); };
 el('linemode').onchange = function(){ S.terms[sel].line = this.checked; save(); draw(); };
+el('termtol').onchange = function(){
+  var v = this.value.trim();
+  S.terms[sel].tol = v === '' ? null : Math.max(0.5, Math.min(40, +v));
+  save(); draw();
+};
 
 function keyFileText(){
   var rows = S.terms.map(function(t){
     return '  {"label":' + JSON.stringify(t.label) +
            ',"line":' + (t.line ? 'true' : 'false') +
+           (t.tol == null ? '' : ',"tol":' + t.tol) +
            ',"pts":' + JSON.stringify(t.pts) + '}';
   }).join(',\n');
   return 'window.MAPQUIZ_KEY = {\n "version": ' + (S.version + 1) +
@@ -545,10 +601,12 @@ el('applyterms').onclick = function(){
   var old = {};
   S.terms.forEach(function(t){ old[t.label] = t; });
   S.terms = lines.map(function(l){
-    return { label:l, line: old[l] ? !!old[l].line : false, pts: old[l] ? old[l].pts : [] };
+    return { label:l, line: old[l] ? !!old[l].line : false,
+             tol: old[l] ? old[l].tol : null, pts: old[l] ? old[l].pts : [] };
   });
   sel = 0;
   placements = {};
+  setRange(1, S.terms.length);
   save();
   draw();
   alert('Term list updated: ' + lines.length + ' terms.');
@@ -592,11 +650,13 @@ function boot(){
   el('tolv').textContent = S.tol + '% of width';
   el('termtext').value = S.terms.map(function(t){ return t.label; }).join('\n');
   el('listhint').textContent = 'Pick a term, then click the map. Click a placed number to remove it.';
+  setRange(S.dfrom || 1, S.dto || S.terms.length);
   draw();
 }
 load();
 boot();
-setImage(S.imgSrc || 'map.png', false);
+/* The key names its own map file, so classmates load the right image automatically. */
+setImage(S.imgSrc || (BAKED && BAKED.map) || 'map.png', false);
 el('status').textContent = 'Key: ' + source;
 window.addEventListener('resize', draw);
 </script>
