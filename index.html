@@ -51,6 +51,7 @@ summary{cursor:pointer;font-size:12px;color:#444}
 
 <div id="top">
   <b>Map Quiz</b>
+  <select id="quiz" style="font:13px system-ui;padding:2px 4px;width:auto"></select>
   <span>
     Mode:
     <label><input type="radio" name="mode" value="quiz" checked> Full quiz</label>
@@ -99,12 +100,12 @@ summary{cursor:pointer;font-size:12px;color:#444}
         A <b>city</b> needs one click. A <b>region or sea</b>: a few clicks across it.
         A <b>river</b>: tick &ldquo;Line feature&rdquo; and click along its course &mdash; anywhere
         on the path between your clicks then counts as correct. Saves automatically.</p>
-      <div class="row"><button id="dl">Download key.js</button><button id="showtext">Show key text</button></div>
+      <div class="row"><button id="dl">Download key file</button><button id="showtext">Show key text</button></div>
     </div>
 
     <details>
       <summary>Map image</summary>
-      <p class="small">The app looks for <code>map.png</code> next to this file. You can also load one here (stored in this browser only).</p>
+      <p class="small">Each quiz's key names its own map file, which loads automatically. You can also load a different image here (stored in this browser only).</p>
       <input type="file" id="file" accept="image/*">
       <div class="row"><input type="url" id="url" placeholder="or paste an image URL"><button id="loadurl">Load</button></div>
       <p class="small" id="imgnote"></p>
@@ -121,7 +122,7 @@ summary{cursor:pointer;font-size:12px;color:#444}
     <details>
       <summary>Data</summary>
       <div class="row"><button id="resetstats">Reset drill stats</button><button id="revert">Revert to published key</button></div>
-      <p class="small">Your work saves to this browser automatically. To share it with other people, download <code>key.js</code> and put it next to <code>index.html</code>.</p>
+      <p class="small">Your work saves to this browser automatically. To share it with other people, download the key file and put it next to <code>index.html</code>.</p>
       <textarea id="keytext" style="display:none"></textarea>
     </details>
 
@@ -129,7 +130,7 @@ summary{cursor:pointer;font-size:12px;color:#444}
 
   <div id="mapcol">
     <div class="stage" id="stage">
-      <div id="ph">No map image loaded.<br>Put <code>map.png</code> next to this file,<br>or load one under &ldquo;Map image&rdquo;.</div>
+      <div id="ph">No map image loaded.<br>The key file names the map it expects &mdash; check that file is next to <code>index.html</code>,<br>or load one under &ldquo;Map image&rdquo;.</div>
       <svg class="paths" id="paths" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
       <div class="overlay" id="overlay"></div>
     </div>
@@ -138,11 +139,47 @@ summary{cursor:pointer;font-size:12px;color:#444}
 
 <div id="status"></div>
 
-<script src="key.js"></script>
+<!-- One published key per quiz. Each registers itself into window.MAPQUIZ_KEYS. -->
+<script src="germany.key.js"></script>
+<script src="france.key.js"></script>
 <script>
+/* ---------------------------------------------------------------- quiz */
+/* Which quiz: the URL hash wins (so #france is a shareable link), then the
+   last one used in this browser, then the first key file loaded. */
+var KEYS = window.MAPQUIZ_KEYS || {};
+var QUIZ_IDS = Object.keys(KEYS);
+var QUIZ = (function(){
+  var h = location.hash.replace('#', '');
+  if (KEYS[h]) return h;
+  var last = null;
+  try { last = localStorage.getItem('mapquiz:current'); } catch(e){}
+  if (last && KEYS[last]) return last;
+  return QUIZ_IDS[0] || 'germany';
+})();
+try { localStorage.setItem('mapquiz:current', QUIZ); } catch(e){}
+
+(function(){
+  var sel = document.getElementById('quiz');
+  QUIZ_IDS.forEach(function(id){
+    var o = document.createElement('option');
+    o.value = id;
+    o.textContent = KEYS[id].title || id;
+    if (id === QUIZ) o.selected = true;
+    sel.appendChild(o);
+  });
+  if (QUIZ_IDS.length < 2) sel.style.display = 'none';
+  sel.onchange = function(){
+    /* Every piece of state below is per quiz, so the cleanest switch is a reload. */
+    try { localStorage.setItem('mapquiz:current', this.value); } catch(e){}
+    location.hash = this.value;
+    location.reload();
+  };
+  document.title = 'Map Quiz — ' + ((KEYS[QUIZ] && KEYS[QUIZ].title) || QUIZ);
+})();
+
 /* ---------------------------------------------------------------- state */
-var BAKED = window.MAPQUIZ_KEY || null;
-var LS = 'mapquiz:germany';
+var BAKED = KEYS[QUIZ] || null;
+var LS = 'mapquiz:' + QUIZ;
 var DEFAULTS = ["Rhine","Danube","Elbe","Oder","Main","Weser","Moselle","Neckar","Spree",
  "Berlin","Hamburg","Munich","Cologne","Frankfurt","Stuttgart","Dusseldorf","Dresden",
  "Leipzig","Bremen","Hannover","Nuremberg","Kiel","Bavaria","Saxony","Black Forest",
@@ -186,7 +223,7 @@ function load(){
           imgSrc:(stored && stored.imgSrc) || null, stats:(stored && stored.stats) || {},
           zoom:(stored && +stored.zoom) || 80,
           dfrom:(stored && +stored.dfrom) || 0, dto:(stored && +stored.dto) || 0 };
-    source = BAKED ? 'published key.js (v' + baked.version + ')' : 'nothing saved yet';
+    source = BAKED ? 'published ' + keyFileName() + ' (v' + baked.version + ')' : 'nothing saved yet';
   }
   if (!S.terms.length) S.terms = DEFAULTS.map(function(l){ return { label:l, pts:[] }; });
 }
@@ -199,7 +236,7 @@ function save(){
   } catch(e){
     if (!saveWarned){
       saveWarned = true;
-      alert('Could not save to this browser (storage is full). If you loaded a large map image here, save it as map.png next to this file instead.');
+      alert('Could not save to this browser (storage is full). If you loaded a large map image here, keep it as a file next to index.html instead.');
     }
     el('status').textContent = 'Key: ' + source + ' · SAVE FAILED (storage full)';
   }
@@ -216,15 +253,23 @@ function inMap(cx, cy){
   var r = rect();
   return cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom;
 }
+/* Height/width of the map. Taken from the image's own pixels, not its rendered
+   box, so scoring never depends on layout (a hidden or not-yet-sized page
+   would otherwise make every distance NaN and every answer wrong). */
+function aspect(){
+  if (imgEl && imgEl.naturalWidth) return imgEl.naturalHeight / imgEl.naturalWidth;
+  var r = rect();
+  return r.width ? r.height / r.width : 1;
+}
 /* distance in fractions of image width; y is scaled so the tolerance circle is round on screen */
 function dist(a, b){
-  var r = rect(), asp = r.height / r.width;
+  var asp = aspect();
   var dx = a[0] - b[0], dy = (a[1] - b[1]) * asp;
   return Math.sqrt(dx * dx + dy * dy);
 }
 /* distance to the segment a-b, same scaled space as dist() */
 function distSeg(p, a, b){
-  var r = rect(), asp = r.height / r.width;
+  var asp = aspect();
   var px = p[0], py = p[1] * asp;
   var ax = a[0], ay = a[1] * asp, bx = b[0], by = b[1] * asp;
   var dx = bx - ax, dy = by - ay;
@@ -267,7 +312,7 @@ function setImage(src, remember){
     S.imgSrc = null;
     save();
     el('imgnote').textContent = 'Loaded, but too large to keep in browser storage — it will be gone on reload. ' +
-      'Save this image as map.png next to index.html and it loads every time.';
+      'Keep it as a file next to index.html and name it in the key file instead.';
   } else {
     S.imgSrc = src;
     save();
@@ -539,14 +584,21 @@ function keyFileText(){
            (t.tol == null ? '' : ',"tol":' + t.tol) +
            ',"pts":' + JSON.stringify(t.pts) + '}';
   }).join(',\n');
-  return 'window.MAPQUIZ_KEY = {\n "version": ' + (S.version + 1) +
-         ',\n "tol": ' + S.tol + ',\n "terms": [\n' + rows + '\n ]\n};\n';
+  var title = (BAKED && BAKED.title) || QUIZ;
+  var map   = (BAKED && BAKED.map)   || 'map.png';
+  return 'window.MAPQUIZ_KEYS = window.MAPQUIZ_KEYS || {};\n' +
+         'window.MAPQUIZ_KEYS[' + JSON.stringify(QUIZ) + '] = {\n' +
+         ' "title": ' + JSON.stringify(title) + ',\n' +
+         ' "version": ' + (S.version + 1) + ',\n' +
+         ' "map": ' + JSON.stringify(map) + ',\n' +
+         ' "tol": ' + S.tol + ',\n "terms": [\n' + rows + '\n ]\n};\n';
 }
+function keyFileName(){ return QUIZ + '.key.js'; }
 el('dl').onclick = function(){
   var blob = new Blob([keyFileText()], { type:'text/javascript' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'key.js';
+  a.download = keyFileName();
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -630,11 +682,11 @@ el('resetstats').onclick = function(){
   draw();
 };
 el('revert').onclick = function(){
-  if (!BAKED){ alert('No key.js is present to revert to.'); return; }
-  if (!confirm('Discard your local key and use the published key.js? Drill stats are kept.')) return;
+  if (!BAKED){ alert('No published key is present to revert to.'); return; }
+  if (!confirm('Discard your local key and use the published ' + keyFileName() + '? Drill stats are kept.')) return;
   S = { version:+BAKED.version || 0, tol:+BAKED.tol || 5, terms:cleanTerms(BAKED.terms),
         imgSrc:S.imgSrc, stats:S.stats };
-  source = 'published key.js (v' + S.version + ')';
+  source = 'published ' + keyFileName() + ' (v' + S.version + ')';
   sel = 0;
   placements = {};
   save();
