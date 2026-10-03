@@ -36,14 +36,22 @@ if (bad.length) { console.error('OUT OF BOUNDS (off the map image):\n' + bad.joi
 const dupes = terms.map(t => t.label).filter((l, i, a) => a.indexOf(l) !== i);
 if (dupes.length) { console.error('DUPLICATE LABELS: ' + dupes.join(', ')); process.exit(1); }
 
-// ---- auto tolerance for cities ----
-// A city must not be satisfied by a click aimed at a different city. Cities sitting
-// inside a region (Cologne in the Rhineland) is expected, so regions are ignored here.
+// ---- auto tolerance for "city" terms ----
+// kind "city" means a small, point-like feature that must stay distinguishable from
+// the other small features: a town, an islet, a strait, a firth. Each gets a radius
+// of half the gap to its nearest neighbour. A small feature sitting inside a region
+// (Cologne in the Rhineland, Liverpool on the Mersey) is expected, so "area" and
+// "line" terms are deliberately ignored here.
 const d = (a, b) => Math.hypot(a[0]-b[0], (a[1]-b[1]) * Q.aspect);
+const gap = (a, b) => {                                // closest approach of two terms
+  let m = Infinity;
+  a.pts.forEach(p => b.pts.forEach(q => { m = Math.min(m, d(p, q)); }));
+  return m;
+};
 const cities = terms.filter(t => t.kind === 'city');
 cities.forEach(c => {
   let nearest = Infinity;
-  cities.forEach(o => { if (o !== c) nearest = Math.min(nearest, d(c.pts[0], o.pts[0])); });
+  cities.forEach(o => { if (o !== c) nearest = Math.min(nearest, gap(c, o)); });
   const half = nearest * 100 / 2;                       // half the gap, as % of width
   c.tol = +Math.max(Q.minCityTol, Math.min(Q.tol, half)).toFixed(1);
 });
@@ -51,7 +59,7 @@ cities.forEach(c => {
 // confirm no city can be claimed by a click aimed at another city
 const clashes = [];
 cities.forEach(a => cities.forEach(b => {
-  if (a !== b && d(a.pts[0], b.pts[0]) * 100 <= b.tol) clashes.push(`${a.label} click satisfies ${b.label}`);
+  if (a !== b && gap(a, b) * 100 <= b.tol) clashes.push(`${a.label} click satisfies ${b.label}`);
 }));
 if (clashes.length) { console.error('CITY CLASH:\n' + clashes.join('\n')); process.exit(1); }
 
